@@ -13,6 +13,13 @@ from .visuals import HEIGHT, WIDTH
 
 _MODEL = "gemini-2.5-flash-image"
 
+_last_error: str | None = None
+
+
+def get_last_error() -> str | None:
+    """가장 최근 이미지 생성 실패의 원인 메시지를 반환한다 (진단용)."""
+    return _last_error
+
 _STYLE_SUFFIX = (
     "세로형(9:16) 영상의 배경으로 쓸 시네마틱한 이미지. "
     "사람의 얼굴이 두드러지게 나오거나, 글자/텍스트/로고가 들어가지 않도록 해줘. "
@@ -30,7 +37,10 @@ def generate_image_for_line(line: str, mood_hint: str = "") -> Image.Image | Non
 
     실패하거나 API 키가 없으면 None을 반환한다.
     """
+    global _last_error
+
     if not is_available():
+        _last_error = "GEMINI_API_KEY(또는 GOOGLE_API_KEY)가 설정되어 있지 않습니다."
         return None
 
     try:
@@ -55,15 +65,19 @@ def generate_image_for_line(line: str, mood_hint: str = "") -> Image.Image | Non
         )
         candidates = response.candidates or []
         if not candidates:
+            _last_error = f"응답에 이미지 후보가 없습니다. (finish_reason: {getattr(response, 'prompt_feedback', None)})"
             return None
         for part in candidates[0].content.parts:
             if part.inline_data is not None:
                 img = Image.open(BytesIO(part.inline_data.data)).convert("RGB")
                 if img.size != (WIDTH, HEIGHT):
                     img = img.resize((WIDTH, HEIGHT))
+                _last_error = None
                 return img
+        _last_error = "응답에 이미지 데이터가 포함되어 있지 않습니다 (텍스트 응답만 반환됨)."
         return None
-    except Exception:
+    except Exception as e:
+        _last_error = f"{type(e).__name__}: {e}"
         return None
 
 

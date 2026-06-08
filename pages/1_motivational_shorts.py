@@ -188,6 +188,9 @@ if script:
                         st.image(img, use_container_width=True)
                     else:
                         st.warning("생성 실패 — 최종 영상에서는 그라디언트 배경으로 대체됩니다.")
+                        last_error = image_gen.get_last_error()
+                        if last_error:
+                            st.caption(f"🔎 실패 원인: {last_error}")
                 with c2:
                     st.markdown(f"**{line}**")
                     if st.button("🔁 이 이미지만 다시 생성", key=f"regen_img_{i}"):
