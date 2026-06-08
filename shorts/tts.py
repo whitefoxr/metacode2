@@ -9,9 +9,14 @@ import wave
 from dataclasses import dataclass
 
 VOICES = {
-    "한국어 - 여성 (선희)": "ko-KR-SunHiNeural",
-    "한국어 - 남성 (인준)": "ko-KR-InJoonNeural",
+    "한국어 - 여성, 차분한 (선희)": "ko-KR-SunHiNeural",
+    "한국어 - 여성, 따뜻한 (지민)": "ko-KR-JiMinNeural",
+    "한국어 - 여성, 부드러운 (서현)": "ko-KR-SeoHyeonNeural",
+    "한국어 - 여성, 밝은 (유진)": "ko-KR-YuJinNeural",
+    "한국어 - 남성, 신뢰감 있는 (인준)": "ko-KR-InJoonNeural",
+    "한국어 - 남성, 또렷한 (국민)": "ko-KR-GookMinNeural",
     "영어 - 여성 (Aria)": "en-US-AriaNeural",
+    "영어 - 남성 (Guy)": "en-US-GuyNeural",
 }
 
 # 단어/글자 수 기반으로 줄 길이를 추정할 때 쓰는 평균 발화 속도 (글자/초)
@@ -147,7 +152,7 @@ def synthesize(lines: list[str], voice_label: str, work_dir: str) -> Narration:
     edge-tts → gTTS → 무음 트랙 순서로 시도한다.
     """
     os.makedirs(work_dir, exist_ok=True)
-    voice = VOICES.get(voice_label, VOICES["한국어 - 여성 (선희)"])
+    voice = VOICES.get(voice_label, next(iter(VOICES.values())))
 
     edge_path = os.path.join(work_dir, "narration_edge.mp3")
     result = _try_edge_tts(lines, voice, edge_path)

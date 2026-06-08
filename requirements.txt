@@ -8,3 +8,4 @@ edge-tts
 gTTS
 pillow
 anthropic
+google-genai

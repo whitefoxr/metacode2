@@ -1,13 +1,18 @@
 """대본 줄과 타이밍 정보로 쇼츠용 자막 클립을 생성한다."""
 import glob
+import os
 
 from .visuals import HEIGHT, WIDTH
 
+# 배포 환경에 한글 폰트가 없어 자막이 깨지는 문제를 막기 위해
+# 한글 글리프를 포함한 폰트를 저장소에 직접 포함시켜 우선 사용한다.
+_BUNDLED_FONT = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts", "NanumGothic-Bold.ttf")
+
 _FONT_CANDIDATES = [
+    _BUNDLED_FONT,
     "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansKR-Bold.ttf",
-    # 한글 글리프를 포함하는 폰트 (Noto/Nanum이 없을 때의 대비책)
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
 ]

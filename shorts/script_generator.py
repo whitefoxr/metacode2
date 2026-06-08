@@ -151,26 +151,69 @@ def _build_with_template(theme: str, topic: str, num_lines: int, rng: random.Ran
 
 
 _CLAUDE_SYSTEM_PROMPT = """\
-너는 유튜브 쇼츠용 동기부여 영상 대본 작가다.
-시청자의 마음을 짧고 강하게 울리는 한국어 대본을 작성한다.
-규칙:
-- 한 문장은 자막 한 줄로 쓰일 만큼 짧고 명확해야 한다 (각 문장 12~28자 권장).
-- 과장되거나 상투적인 표현은 피하고, 진심이 느껴지는 담백한 문장을 쓴다.
-- 반드시 JSON 객체 하나만 출력한다. 다른 설명/코드블록 금지.
+너는 유튜브 쇼츠 동기부여 영상의 대본을 쓰는 전문 작가다.
+목표는 "끝까지 보고, 댓글을 남기고 싶게 만드는" 30~50초 분량의 한국어 대본이다.
+
+구조와 규칙:
+1. hook (후크, 도입부 1문장)
+   - 영상 시작 1~2초 안에 시청자의 시선을 붙잡아야 한다.
+   - "혹시 ~한 적 있나요?", "이 말을 들어야 할 사람", "아무도 말해주지 않은 사실" 처럼
+     궁금증을 자극하거나 자신의 이야기처럼 느끼게 만드는 문장으로 시작한다.
+   - 뻔한 인사말("안녕하세요", "오늘은...")로 시작하지 않는다.
+2. lines (본문)
+   - 각 문장은 자막 한 줄 분량으로 짧고 명확해야 한다 (12~28자 권장).
+   - 문장마다 새로운 정보·관점·이미지를 던져 호흡을 빠르게 이어가고, 같은 말을 반복하지 않는다.
+   - 지루하지 않도록 문장 길이와 리듬에 변주를 준다 (단문 - 약간 긴 문장 - 단문 순서 등).
+   - 과장되거나 상투적인 표현은 피하고 진심이 느껴지는 담백한 문장을 쓴다.
+3. cta (마무리, 1문장)
+   - 결론을 다 말해주지 말고, 시청자가 스스로 생각해보게 만드는 "여운 있는 깨달음"으로 끝낸다.
+   - 자연스럽게 댓글을 남기고 싶어지도록 질문형이거나, 자신의 이야기를 떠올리게 하는 문장이 좋다.
+   - 직접적으로 "댓글 달아주세요", "구독하세요" 같은 요청 문구는 쓰지 않는다 (어색하고 진부함).
+
+반드시 JSON 객체 하나만 출력한다. 다른 설명, 마크다운, 코드블록은 절대 포함하지 않는다.
 JSON 형식: {"hook": "도입부 한 문장", "lines": ["본문 문장1", "본문 문장2", ...], "cta": "마무리 한 문장"}
 "lines" 배열의 길이는 요청된 줄 수와 정확히 같아야 한다.
 """
 
 
-def _build_with_claude(theme: str, topic: str, tone: str, num_lines: int) -> Script | None:
+def _parse_script_json(text: str, title: str) -> Script | None:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text.split("\n", 1)[1] if "\n" in text else text
+    data = json.loads(text)
+
+    lines = [str(line).strip() for line in data["lines"] if str(line).strip()]
+    if not lines:
+        return None
+    return Script(
+        title=title,
+        hook=str(data["hook"]).strip(),
+        lines=lines,
+        cta=str(data["cta"]).strip(),
+        source="claude",
+    )
+
+
+def _call_claude(system_prompt: str, content) -> str:
+    import anthropic
+
     api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        system=system_prompt,
+        messages=[{"role": "user", "content": content}],
+    )
+    return "".join(block.text for block in message.content if block.type == "text")
+
+
+def _build_with_claude(theme: str, topic: str, tone: str, num_lines: int) -> Script | None:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
 
     try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=api_key)
         tone_desc = THEME_TONE_PRESETS.get(tone, tone)
         user_prompt = (
             f"주제/테마: {theme}\n"
@@ -179,29 +222,51 @@ def _build_with_claude(theme: str, topic: str, tone: str, num_lines: int) -> Scr
             f"본문 문장 개수: {num_lines}\n"
             "위 조건에 맞는 쇼츠 대본을 JSON으로 작성해줘."
         )
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=_CLAUDE_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        text = "".join(block.text for block in message.content if block.type == "text").strip()
-        if text.startswith("```"):
-            text = text.strip("`")
-            text = text.split("\n", 1)[1] if "\n" in text else text
-        data = json.loads(text)
-
-        lines = [str(line).strip() for line in data["lines"] if str(line).strip()]
-        if not lines:
-            return None
+        text = _call_claude(_CLAUDE_SYSTEM_PROMPT, user_prompt)
         title = topic.strip() if topic.strip() else theme
-        return Script(
-            title=title,
-            hook=str(data["hook"]).strip(),
-            lines=lines,
-            cta=str(data["cta"]).strip(),
-            source="claude",
-        )
+        return _parse_script_json(text, title)
+    except Exception:
+        return None
+
+
+def generate_script_from_image(
+    image_bytes: bytes,
+    media_type: str,
+    theme: str,
+    tone: str = "잔잔하고 따뜻하게",
+    num_lines: int = 4,
+) -> Script | None:
+    """업로드된 이미지의 글자/메시지/분위기를 바탕으로 대본을 생성한다 (Claude Vision 사용).
+
+    ANTHROPIC_API_KEY가 없거나 호출에 실패하면 None을 반환한다.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    try:
+        import base64
+
+        b64 = base64.standard_b64encode(image_bytes).decode("ascii")
+        tone_desc = THEME_TONE_PRESETS.get(tone, tone)
+        user_content = [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": b64},
+            },
+            {
+                "type": "text",
+                "text": (
+                    "이 이미지를 참고해서 동기부여 쇼츠 대본을 만들어줘.\n"
+                    "- 이미지 안에 글자(문구, 메모, 명언 등)가 있다면 그 메시지를 핵심 소재로 자연스럽게 녹여내고,\n"
+                    "  글자가 없다면 이미지의 분위기·상황·감정을 영감으로 삼아줘.\n"
+                    f"- 전체적인 주제/테마: {theme}\n"
+                    f"- 톤앤매너: {tone_desc}\n"
+                    f"- 본문 문장 개수: {num_lines}"
+                ),
+            },
+        ]
+        text = _call_claude(_CLAUDE_SYSTEM_PROMPT, user_content)
+        return _parse_script_json(text, title=theme)
     except Exception:
         return None
 

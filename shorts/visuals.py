@@ -105,3 +105,52 @@ def make_background_clip(theme_name: str, duration: float, seed: int = 0):
         return np.array(composed)
 
     return VideoClip(make_frame, duration=duration).with_fps(FPS)
+
+
+def make_still_background(theme_name: str, seed: int = 0) -> Image.Image:
+    """단일 정지 그라디언트+보케 이미지를 만든다 (생성 이미지가 없을 때의 대체용)."""
+    colors = COLOR_THEMES.get(theme_name, next(iter(COLOR_THEMES.values())))
+    base = _vertical_gradient(colors, phase=0.0)
+    img = Image.fromarray(base, mode="RGB").convert("RGBA")
+
+    rng = np.random.default_rng(seed)
+    overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    for p in _make_particles(rng, count=10):
+        r = p["r"]
+        alpha = int(255 * p["alpha"])
+        draw.ellipse([p["x"] - r, p["y"] - r, p["x"] + r, p["y"] + r], fill=(255, 255, 255, alpha))
+
+    return Image.alpha_composite(img, overlay).convert("RGB")
+
+
+def _ken_burns_clip(image: Image.Image, duration: float, zoom_in: bool):
+    """이미지를 천천히 확대/축소하며 보여주는 클립을 만든다 (정적인 느낌을 줄여줌)."""
+    from moviepy import ImageClip
+
+    start_scale, end_scale = (1.0, 1.08) if zoom_in else (1.08, 1.0)
+    duration = max(duration, 0.1)
+
+    clip = ImageClip(np.array(image)).with_duration(duration)
+
+    def scale_at(t):
+        ratio = min(t / duration, 1.0)
+        return start_scale + (end_scale - start_scale) * ratio
+
+    return clip.resized(scale_at).with_position("center")
+
+
+def make_image_sequence_clip(images: list[Image.Image], durations: list[float], seed: int = 0):
+    """문단별 이미지를 순서대로 이어 붙여 켄 번즈 효과가 있는 배경 영상을 만든다."""
+    from moviepy import CompositeVideoClip
+
+    rng = np.random.default_rng(seed)
+    clips = []
+    t = 0.0
+    for img, dur in zip(images, durations):
+        zoom_in = bool(rng.integers(0, 2))
+        clip = _ken_burns_clip(img, dur, zoom_in=zoom_in).with_start(t)
+        clips.append(clip)
+        t += dur
+
+    return CompositeVideoClip(clips, size=(WIDTH, HEIGHT)).with_duration(t)
