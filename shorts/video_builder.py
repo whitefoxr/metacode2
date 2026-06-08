@@ -24,6 +24,8 @@ def build_short(
     voice_label: str,
     work_dir: str,
     seed: int = 0,
+    voice_rate: int = -8,
+    voice_pitch: int = 0,
     images: list[Image.Image | None] | None = None,
     narration: tts.Narration | None = None,
     progress_cb=None,
@@ -48,7 +50,7 @@ def build_short(
 
     if narration is None:
         report("내레이션 음성 합성 중...", 0.1)
-        narration = tts.synthesize(lines, voice_label, work_dir)
+        narration = tts.synthesize(lines, voice_label, work_dir, rate=voice_rate, pitch=voice_pitch)
 
     report("배경 영상 구성 중...", 0.4)
     background, used_generated = _build_background(

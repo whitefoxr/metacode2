@@ -229,14 +229,16 @@ def _build_with_claude(theme: str, topic: str, tone: str, num_lines: int) -> Scr
         return None
 
 
-def generate_script_from_image(
-    image_bytes: bytes,
-    media_type: str,
-    theme: str,
-    tone: str = "잔잔하고 따뜻하게",
-    num_lines: int = 4,
-) -> Script | None:
-    """업로드된 이미지의 글자/메시지/분위기를 바탕으로 대본을 생성한다 (Claude Vision 사용).
+_EXTRACT_SYSTEM_PROMPT = """\
+너는 이미지 속 텍스트와 메시지를 정확히 읽어내는 전문가다.
+이미지에서 발견한 글자(문구, 명언, 메모, 손글씨 등)를 가능한 그대로 옮기고,
+글자가 없다면 이미지가 전하는 분위기·감정·핵심 메시지를 한두 문장으로 요약한다.
+군더더기 설명 없이, 추출/요약한 내용만 간결하게 출력한다.
+"""
+
+
+def extract_image_message(image_bytes: bytes, media_type: str) -> str | None:
+    """이미지 속 글자나 핵심 메시지를 추출한다 (Claude Vision 사용).
 
     ANTHROPIC_API_KEY가 없거나 호출에 실패하면 None을 반환한다.
     """
@@ -247,7 +249,6 @@ def generate_script_from_image(
         import base64
 
         b64 = base64.standard_b64encode(image_bytes).decode("ascii")
-        tone_desc = THEME_TONE_PRESETS.get(tone, tone)
         user_content = [
             {
                 "type": "image",
@@ -255,17 +256,42 @@ def generate_script_from_image(
             },
             {
                 "type": "text",
-                "text": (
-                    "이 이미지를 참고해서 동기부여 쇼츠 대본을 만들어줘.\n"
-                    "- 이미지 안에 글자(문구, 메모, 명언 등)가 있다면 그 메시지를 핵심 소재로 자연스럽게 녹여내고,\n"
-                    "  글자가 없다면 이미지의 분위기·상황·감정을 영감으로 삼아줘.\n"
-                    f"- 전체적인 주제/테마: {theme}\n"
-                    f"- 톤앤매너: {tone_desc}\n"
-                    f"- 본문 문장 개수: {num_lines}"
-                ),
+                "text": "이 이미지에서 글자나 핵심 메시지를 추출(또는 분위기를 요약)해줘.",
             },
         ]
-        text = _call_claude(_CLAUDE_SYSTEM_PROMPT, user_content)
+        text = _call_claude(_EXTRACT_SYSTEM_PROMPT, user_content)
+        text = text.strip()
+        return text or None
+    except Exception:
+        return None
+
+
+def generate_script_like(
+    reference_text: str,
+    theme: str,
+    tone: str = "잔잔하고 따뜻하게",
+    num_lines: int = 4,
+) -> Script | None:
+    """주어진 글(레퍼런스)과 비슷한 결의 새로운 동기부여 쇼츠 대본을 생성한다.
+
+    이미지에서 추출한 문구를 그대로 베끼는 대신, 같은 정서·메시지 방향을
+    살린 새로운 대본을 작성한다. ANTHROPIC_API_KEY가 없으면 None을 반환한다.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    try:
+        tone_desc = THEME_TONE_PRESETS.get(tone, tone)
+        user_prompt = (
+            f"아래는 참고할 글(이미지에서 추출한 문구 또는 분위기 요약)이야:\n"
+            f"---\n{reference_text}\n---\n\n"
+            "이 글이 전하는 메시지와 정서의 '결'을 살려서, 그대로 베끼지 말고 "
+            "새로운 동기부여 쇼츠 대본을 작성해줘.\n"
+            f"- 전체적인 주제/테마: {theme}\n"
+            f"- 톤앤매너: {tone_desc}\n"
+            f"- 본문 문장 개수: {num_lines}"
+        )
+        text = _call_claude(_CLAUDE_SYSTEM_PROMPT, user_prompt)
         return _parse_script_json(text, title=theme)
     except Exception:
         return None

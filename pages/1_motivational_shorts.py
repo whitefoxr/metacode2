@@ -23,7 +23,7 @@ for key, default in (
     ("script", None),
     ("script_images", None),
     ("build_result", None),
-    ("uploaded_image_bytes", None),
+    ("extracted_message", None),
 ):
     if key not in st.session_state:
         st.session_state[key] = default
@@ -40,7 +40,7 @@ mode = st.radio(
     "대본 생성 방식",
     ["주제로 생성하기", "이미지로 생성하기"],
     horizontal=True,
-    help="이미지 업로드 모드는 Claude Vision을 사용해 이미지 속 글자/분위기를 바탕으로 대본을 작성합니다.",
+    help="이미지 모드는 사진 속 글/메시지를 먼저 추출해서 보여준 뒤, 그 글과 비슷한 결로 새 대본을 작성합니다.",
 )
 
 col1, col2 = st.columns(2)
@@ -51,14 +51,6 @@ with col2:
     topic = st.text_input("세부 주제 (선택)", placeholder="예: 월요일 아침, 취업 준비, 운동 시작…")
     num_lines = st.slider("본문 문장 수", min_value=2, max_value=6, value=4)
 
-uploaded_file = None
-if mode == "이미지로 생성하기":
-    uploaded_file = st.file_uploader("대본의 소재가 될 이미지를 업로드하세요", type=["png", "jpg", "jpeg", "webp"])
-    if uploaded_file is not None:
-        st.image(uploaded_file, caption="업로드한 이미지", width=240)
-    if not ANTHROPIC_AVAILABLE:
-        st.warning("⚠️ 이미지 기반 대본 생성에는 ANTHROPIC_API_KEY가 필요합니다.")
-
 seed = st.number_input("랜덤 시드 (같은 값이면 같은 결과 재현)", min_value=0, max_value=9999, value=0, step=1)
 
 if ANTHROPIC_AVAILABLE:
@@ -67,42 +59,68 @@ else:
     st.caption("ℹ️ ANTHROPIC_API_KEY가 없어 큐레이션된 템플릿 대본을 사용합니다.")
 
 
-def _generate_script():
-    if mode == "이미지로 생성하기":
-        if uploaded_file is None:
-            st.warning("이미지를 먼저 업로드해주세요.")
-            return
-        image_bytes = uploaded_file.getvalue()
-        with st.spinner("이미지를 분석해 대본을 작성하는 중..."):
-            script = script_generator.generate_script_from_image(
-                image_bytes=image_bytes,
-                media_type=uploaded_file.type or "image/png",
-                theme=theme,
-                tone=tone,
-                num_lines=num_lines,
-            )
-        if script is None:
-            st.error("이미지 기반 대본 생성에 실패했습니다 (API 키를 확인하거나 다시 시도해주세요). 주제 기반으로 생성합니다.")
-            script = script_generator.generate_script(theme=theme, topic=topic, tone=tone, num_lines=num_lines, seed=int(seed))
-    else:
-        with st.spinner("대본을 생성하는 중..."):
-            script = script_generator.generate_script(theme=theme, topic=topic, tone=tone, num_lines=num_lines, seed=int(seed))
-
-    st.session_state.script = script
+def _reset_downstream():
     st.session_state.script_images = None
     st.session_state.build_result = None
 
 
-gen_col1, gen_col2 = st.columns([1, 1])
-with gen_col1:
-    if st.button("✍️ 대본 생성하기", use_container_width=True):
-        _generate_script()
-with gen_col2:
-    if st.session_state.script is not None:
-        if st.button("🔁 다른 버전으로 다시 생성", use_container_width=True):
-            st.session_state.seed_bump = int(seed) + 1 + st.session_state.get("seed_bump", 0)
-            seed = st.session_state.seed_bump
-            _generate_script()
+if mode == "주제로 생성하기":
+    gen_col1, gen_col2 = st.columns([1, 1])
+    with gen_col1:
+        if st.button("✍️ 대본 생성하기", use_container_width=True):
+            with st.spinner("대본을 생성하는 중..."):
+                st.session_state.script = script_generator.generate_script(
+                    theme=theme, topic=topic, tone=tone, num_lines=num_lines, seed=int(seed)
+                )
+            _reset_downstream()
+    with gen_col2:
+        if st.session_state.script is not None:
+            if st.button("🔁 다른 버전으로 다시 생성", use_container_width=True):
+                bump = st.session_state.get("seed_bump", 0) + 1
+                st.session_state.seed_bump = bump
+                with st.spinner("새 버전을 생성하는 중..."):
+                    st.session_state.script = script_generator.generate_script(
+                        theme=theme, topic=topic, tone=tone, num_lines=num_lines, seed=int(seed) + bump
+                    )
+                _reset_downstream()
+
+else:  # 이미지로 생성하기
+    if not ANTHROPIC_AVAILABLE:
+        st.warning("⚠️ 이미지 기반 대본 생성에는 ANTHROPIC_API_KEY가 필요합니다.")
+
+    uploaded_file = st.file_uploader("대본의 소재가 될 이미지를 먼저 업로드하세요", type=["png", "jpg", "jpeg", "webp"])
+    if uploaded_file is not None:
+        st.image(uploaded_file, caption="업로드한 이미지", width=240)
+
+        if st.button("🔍 사진 속 글 추출하기", use_container_width=True, disabled=not ANTHROPIC_AVAILABLE):
+            with st.spinner("이미지에서 글/메시지를 읽어내는 중..."):
+                extracted = script_generator.extract_image_message(
+                    image_bytes=uploaded_file.getvalue(),
+                    media_type=uploaded_file.type or "image/png",
+                )
+            if extracted is None:
+                st.error("글 추출에 실패했습니다. 다시 시도해주세요.")
+            else:
+                st.session_state.extracted_message = extracted
+                st.session_state.script = None
+                _reset_downstream()
+
+    extracted_message = st.session_state.extracted_message
+    if extracted_message:
+        st.markdown("**추출된 글/메시지** (필요하면 직접 수정할 수 있어요)")
+        extracted_message = st.text_area("추출 결과", value=extracted_message, height=100, label_visibility="collapsed")
+        st.session_state.extracted_message = extracted_message
+
+        if st.button("✍️ 이 내용과 비슷한 결로 대본 만들기", type="primary", use_container_width=True):
+            with st.spinner("비슷한 결로 새 대본을 쓰는 중..."):
+                script = script_generator.generate_script_like(
+                    reference_text=extracted_message, theme=theme, tone=tone, num_lines=num_lines
+                )
+            if script is None:
+                st.error("대본 생성에 실패했습니다. 다시 시도해주세요.")
+            else:
+                st.session_state.script = script
+                _reset_downstream()
 
 script = st.session_state.script
 
@@ -179,6 +197,14 @@ if script:
     st.subheader("4. 내레이션 설정 및 영상 생성")
     voice_label = st.selectbox("내레이션 음성", list(VOICES.keys()))
 
+    with st.expander("🎚️ 목소리 톤 미세 조정 (AI 음성이 어색하게 느껴질 때)"):
+        st.caption(
+            "속도를 살짝 늦추고 음높이를 조금 낮추면 차분하고 사람에 가까운 느낌을 줄 수 있어요. "
+            "문장 사이에 자연스러운 쉼도 자동으로 추가됩니다."
+        )
+        voice_rate = st.slider("말하기 속도 (％, 음수일수록 느려짐)", min_value=-40, max_value=20, value=-8, step=2)
+        voice_pitch = st.slider("음높이 (Hz, 음수일수록 낮아짐)", min_value=-30, max_value=30, value=0, step=2)
+
     if st.button("🎬 쇼츠 영상 생성하기", type="primary", use_container_width=True):
         progress = st.progress(0.0, text="준비 중...")
 
@@ -193,6 +219,8 @@ if script:
                 voice_label=voice_label,
                 work_dir=work_dir,
                 seed=int(seed),
+                voice_rate=int(voice_rate),
+                voice_pitch=int(voice_pitch),
                 images=st.session_state.script_images,
                 progress_cb=on_progress,
             )

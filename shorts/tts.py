@@ -39,16 +39,32 @@ def _estimate_line_durations(lines: list[str], total_duration: float | None = No
     return [w / _FALLBACK_CHARS_PER_SEC for w in weights]
 
 
-def _try_edge_tts(lines: list[str], voice: str, out_path: str) -> Narration | None:
+def _signed_pct(value: int) -> str:
+    return f"{'+' if value >= 0 else ''}{value}%"
+
+
+def _signed_hz(value: int) -> str:
+    return f"{'+' if value >= 0 else ''}{value}Hz"
+
+
+def _try_edge_tts(
+    lines: list[str], voice: str, out_path: str, rate: int = 0, pitch: int = 0
+) -> Narration | None:
     try:
         import edge_tts
     except ImportError:
         return None
 
-    full_text = " ".join(lines)
+    # 문장 사이에 쉼표를 더해 호흡이 너무 빠르게 이어지지 않도록 자연스러운 끊김을 준다
+    full_text = ", ".join(lines)
 
     async def _run():
-        communicate = edge_tts.Communicate(full_text, voice)
+        communicate = edge_tts.Communicate(
+            full_text,
+            voice,
+            rate=_signed_pct(rate),
+            pitch=_signed_hz(pitch),
+        )
         boundaries = []
         with open(out_path, "wb") as f:
             async for chunk in communicate.stream():
@@ -146,16 +162,24 @@ def _audio_duration_seconds(path: str) -> float:
         clip.close()
 
 
-def synthesize(lines: list[str], voice_label: str, work_dir: str) -> Narration:
+def synthesize(
+    lines: list[str],
+    voice_label: str,
+    work_dir: str,
+    rate: int = -8,
+    pitch: int = 0,
+) -> Narration:
     """대본 줄들을 하나의 내레이션 오디오로 합성한다.
 
     edge-tts → gTTS → 무음 트랙 순서로 시도한다.
+    rate/pitch는 edge-tts 음성의 말하기 속도(%)와 음높이(Hz)를 조절해
+    좀 더 자연스럽고 차분한 톤을 낼 수 있게 한다 (기본값은 살짝 느리게).
     """
     os.makedirs(work_dir, exist_ok=True)
     voice = VOICES.get(voice_label, next(iter(VOICES.values())))
 
     edge_path = os.path.join(work_dir, "narration_edge.mp3")
-    result = _try_edge_tts(lines, voice, edge_path)
+    result = _try_edge_tts(lines, voice, edge_path, rate=rate, pitch=pitch)
     if result is not None:
         return result
 
