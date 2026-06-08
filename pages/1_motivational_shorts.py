@@ -85,42 +85,47 @@ if mode == "주제로 생성하기":
                 _reset_downstream()
 
 else:  # 이미지로 생성하기
-    if not ANTHROPIC_AVAILABLE:
-        st.warning("⚠️ 이미지 기반 대본 생성에는 ANTHROPIC_API_KEY가 필요합니다.")
+    st.caption(
+        "사진 속 글이나 메시지를 아래에 직접 입력하면, 그 메시지와 정서의 결을 살린 "
+        "새로운 대본을 만들어 드려요 (그대로 베끼지 않고 새로 씁니다)."
+    )
 
-    uploaded_file = st.file_uploader("대본의 소재가 될 이미지를 먼저 업로드하세요", type=["png", "jpg", "jpeg", "webp"])
+    uploaded_file = st.file_uploader(
+        "참고할 사진이 있다면 업로드하세요 (선택 — 옆에 띄워두고 글을 옮겨 적는 용도)",
+        type=["png", "jpg", "jpeg", "webp"],
+    )
     if uploaded_file is not None:
         st.image(uploaded_file, caption="업로드한 이미지", width=240)
 
-        if st.button("🔍 사진 속 글 추출하기", use_container_width=True, disabled=not ANTHROPIC_AVAILABLE):
-            with st.spinner("이미지에서 글/메시지를 읽어내는 중..."):
-                extracted = script_generator.extract_image_message(
-                    image_bytes=uploaded_file.getvalue(),
-                    media_type=uploaded_file.type or "image/png",
-                )
-            if extracted is None:
-                st.error("글 추출에 실패했습니다. 다시 시도해주세요.")
-            else:
-                st.session_state.extracted_message = extracted
-                st.session_state.script = None
-                _reset_downstream()
+    extracted_message = st.text_area(
+        "사진 속 글/메시지를 직접 입력해주세요",
+        value=st.session_state.extracted_message or "",
+        height=100,
+        placeholder="예: 포기하지 않으면 실패는 없다. 오늘의 작은 노력이 내일을 만든다…",
+    )
+    st.session_state.extracted_message = extracted_message
 
-    extracted_message = st.session_state.extracted_message
-    if extracted_message:
-        st.markdown("**추출된 글/메시지** (필요하면 직접 수정할 수 있어요)")
-        extracted_message = st.text_area("추출 결과", value=extracted_message, height=100, label_visibility="collapsed")
-        st.session_state.extracted_message = extracted_message
+    if ANTHROPIC_AVAILABLE:
+        st.caption("✅ Claude API로 입력하신 글의 메시지와 정서를 살린 새 대본을 작성합니다.")
+    else:
+        st.caption("ℹ️ ANTHROPIC_API_KEY가 없어 큐레이션된 템플릿 초안을 만들어 드려요. 입력하신 글을 참고해 자유롭게 다듬어보세요.")
 
-        if st.button("✍️ 이 내용과 비슷한 결로 대본 만들기", type="primary", use_container_width=True):
-            with st.spinner("비슷한 결로 새 대본을 쓰는 중..."):
-                script = script_generator.generate_script_like(
-                    reference_text=extracted_message, theme=theme, tone=tone, num_lines=num_lines
-                )
-            if script is None:
-                st.error("대본 생성에 실패했습니다. 다시 시도해주세요.")
-            else:
-                st.session_state.script = script
-                _reset_downstream()
+    if st.button(
+        "✍️ 이 내용과 비슷한 결로 대본 만들기",
+        type="primary",
+        use_container_width=True,
+        disabled=not extracted_message.strip(),
+    ):
+        with st.spinner("비슷한 결로 새 대본을 쓰는 중..."):
+            script = script_generator.generate_script_like(
+                reference_text=extracted_message,
+                theme=theme,
+                tone=tone,
+                num_lines=num_lines,
+                seed=int(seed),
+            )
+        st.session_state.script = script
+        _reset_downstream()
 
 script = st.session_state.script
 
