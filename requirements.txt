@@ -3,3 +3,8 @@ pandas
 numpy
 matplotlib
 scipy
+moviepy
+edge-tts
+gTTS
+pillow
+anthropic
